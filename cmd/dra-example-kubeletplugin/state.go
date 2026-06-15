@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -80,8 +81,7 @@ type DeviceState struct {
 	checkpointDecoder runtime.Decoder
 	checkpointEncoder runtime.Encoder
 
-	coreClient      coreclientset.Interface
-	gpuDeviceStatus bool
+	coreClient coreclientset.Interface
 }
 
 func NewDeviceState(config *Config) (*DeviceState, error) {
@@ -146,7 +146,6 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 		checkpointDecoder: checkpointDecoder,
 		checkpointEncoder: checkpointEncoder,
 		coreClient:        config.coreclient,
-		gpuDeviceStatus:   config.flags.gpuDeviceStatus,
 	}
 
 	return state, nil
@@ -216,6 +215,21 @@ func (s *DeviceState) Unprepare(claimUID types.UID) error {
 // prepareDevices performs one-time setup for the devices allocated to a
 // ResourceClaim before being consumed by a Pod.
 func (s *DeviceState) prepareDevices(ctx context.Context, claim *resourceapi.ResourceClaim) (PreparedDevices, error) {
+	// Create directories for each allocated device BEFORE computing device config
+	// Directory name format: {claim-name}-{device-name}
+	for _, result := range claim.Status.Allocation.Devices.Results {
+		if result.Driver != s.driverName {
+			continue
+		}
+		claimDir, err := s.createClaimDirectory(claim.Name, result.Device)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create claim directory: %w", err)
+		}
+		klog.FromContext(ctx).Info("Created directory for claim device",
+			"path", claimDir, "claim", claim.Name, "device", result.Device)
+	}
+
+	// Compute device configuration (which will call ApplyConfig with claim.Name)
 	preparedDevices, err := s.computeDeviceConfig(claim)
 	if err != nil {
 		return nil, err
@@ -257,6 +271,19 @@ func (s *DeviceState) prepareDevices(ctx context.Context, claim *resourceapi.Res
 // unprepareDevices undoes any side-effects produced by
 // [DeviceState.prepareDevices].
 func (s *DeviceState) unprepareDevices(claimUID types.UID, checkpoint *checkpointapi.Checkpoint) error {
+	// Find the claim in the checkpoint to get its name and devices
+	for _, preparedClaim := range checkpoint.PreparedClaims {
+		if preparedClaim.UID == claimUID {
+			// Delete directories for all devices allocated to this claim
+			for _, deviceName := range preparedClaim.Devices {
+				if err := s.deleteClaimDirectory(preparedClaim.Name, deviceName); err != nil {
+					klog.Errorf("Failed to delete claim directory for %s-%s: %v", preparedClaim.Name, deviceName, err)
+				}
+			}
+			break
+		}
+	}
+
 	return nil
 }
 
@@ -314,7 +341,7 @@ func (s *DeviceState) computeDeviceConfig(claim *resourceapi.ResourceClaim) (Pre
 	perDeviceCDIContainerEdits := make(profiles.PerDeviceCDIContainerEdits)
 	for config, results := range configResultsMap {
 		// Apply the config to the list of results associated with it.
-		containerEdits, err := s.configHandler.ApplyConfig(config, results)
+		containerEdits, err := s.configHandler.ApplyConfig(claim.Name, config, results)
 		if err != nil {
 			return nil, fmt.Errorf("error applying config: %w", err)
 		}
@@ -352,7 +379,19 @@ func (s *DeviceState) computeDeviceConfig(claim *resourceapi.ResourceClaim) (Pre
 // non-deterministic or expensive to recompute, then those should also be added
 // to the checkpoint here.
 func (*DeviceState) addClaimToCheckpoint(checkpoint *checkpointapi.Checkpoint, claim *resourceapi.ResourceClaim, _ PreparedDevices) {
-	checkpoint.PreparedClaims = append(checkpoint.PreparedClaims, checkpointapi.PreparedClaim{UID: claim.UID})
+	// Extract device names from the allocation
+	var devices []string
+	if claim.Status.Allocation != nil {
+		for _, result := range claim.Status.Allocation.Devices.Results {
+			devices = append(devices, result.Device)
+		}
+	}
+
+	checkpoint.PreparedClaims = append(checkpoint.PreparedClaims, checkpointapi.PreparedClaim{
+		UID:     claim.UID,
+		Name:    claim.Name,
+		Devices: devices,
+	})
 }
 
 // removeClaimFromCheckpoint updates the checkpoint to remove all data
@@ -491,4 +530,27 @@ func (s *DeviceState) updateDeviceStatus(ctx context.Context, ns, name string, d
 		_, err = rc.UpdateStatus(ctx, claim, metav1.UpdateOptions{})
 		return err
 	})
+}
+
+// createClaimDirectory creates a subdirectory for the claim+device
+// Directory name format: {claim-name}-{device-name}
+func (s *DeviceState) createClaimDirectory(claimName string, deviceName string) (string, error) {
+	const baseDir = "/var/run/kubevirt/network"
+
+	subdirName := fmt.Sprintf("%s-%s", claimName, deviceName)
+	claimDir := filepath.Join(baseDir, subdirName)
+
+	if err := os.MkdirAll(claimDir, 0755); err != nil {
+		return "", err
+	}
+
+	return claimDir, nil
+}
+
+// deleteClaimDirectory removes the claim directory
+func (s *DeviceState) deleteClaimDirectory(claimName string, deviceName string) error {
+	const baseDir = "/var/run/kubevirt/network"
+	subdirName := fmt.Sprintf("%s-%s", claimName, deviceName)
+	claimDir := filepath.Join(baseDir, subdirName)
+	return os.RemoveAll(claimDir)
 }

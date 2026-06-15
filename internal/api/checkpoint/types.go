@@ -39,5 +39,7 @@ type Checkpoint struct {
 }
 
 type PreparedClaim struct {
-	UID types.UID
+	UID     types.UID
+	Name    string
+	Devices []string
 }

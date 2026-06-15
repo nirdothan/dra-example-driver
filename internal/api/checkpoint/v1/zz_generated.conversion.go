@@ -82,6 +82,8 @@ func Convert_checkpoint_Checkpoint_To_v1_Checkpoint(in *checkpoint.Checkpoint, o
 
 func autoConvert_v1_PreparedClaim_To_checkpoint_PreparedClaim(in *PreparedClaim, out *checkpoint.PreparedClaim, s conversion.Scope) error {
 	out.UID = types.UID(in.UID)
+	out.Name = in.Name
+	out.Devices = *(*[]string)(unsafe.Pointer(&in.Devices))
 	return nil
 }
 
@@ -92,6 +94,8 @@ func Convert_v1_PreparedClaim_To_checkpoint_PreparedClaim(in *PreparedClaim, out
 
 func autoConvert_checkpoint_PreparedClaim_To_v1_PreparedClaim(in *checkpoint.PreparedClaim, out *PreparedClaim, s conversion.Scope) error {
 	out.UID = types.UID(in.UID)
+	out.Name = in.Name
+	out.Devices = *(*[]string)(unsafe.Pointer(&in.Devices))
 	return nil
 }
 

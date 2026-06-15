@@ -2,7 +2,14 @@
 vendor/
 [._]*.sw[a-p]
 
-./dra-example-kubeletplugin
+# Binaries (in root directory only)
+/dra-example-kubeletplugin
+/dra-example-controller
+/dra-example-webhook
+
+# IDE
+.idea/
+.vscode/
 
 driver_image.tar
 *.tgz

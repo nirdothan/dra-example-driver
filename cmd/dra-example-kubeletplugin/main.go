@@ -32,7 +32,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/dra-example-driver/internal/profiles"
-	"sigs.k8s.io/dra-example-driver/internal/profiles/gpu"
+	"sigs.k8s.io/dra-example-driver/internal/profiles/network"
 	"sigs.k8s.io/dra-example-driver/pkg/flags"
 )
 
@@ -53,9 +53,6 @@ type Flags struct {
 	profile                       string
 	driverName                    string
 	podUID                        string
-	gpuPartitions                 int
-	gpuDeviceStatus               bool
-	bindingConditions             bool
 }
 
 type Config struct {
@@ -67,8 +64,8 @@ type Config struct {
 }
 
 var validProfiles = map[string]func(flags Flags) profiles.Profile{
-	gpu.ProfileName: func(flags Flags) profiles.Profile {
-		return gpu.NewProfile(flags.nodeName, flags.numDevices, flags.gpuPartitions, flags.gpuDeviceStatus, flags.bindingConditions)
+	network.ProfileName: func(flags Flags) profiles.Profile {
+		return network.NewProfile(flags.nodeName, flags.numDevices)
 	},
 }
 
@@ -112,8 +109,8 @@ func newApp() *cli.App {
 		},
 		&cli.IntFlag{
 			Name:        "num-devices",
-			Usage:       "The number of devices to be generated. Only relevant for the " + gpu.ProfileName + " profile.",
-			Value:       8,
+			Usage:       "The number of devices to be generated.",
+			Value:       10,
 			Destination: &flags.numDevices,
 			EnvVars:     []string{"NUM_DEVICES"},
 		},
@@ -141,7 +138,7 @@ func newApp() *cli.App {
 		&cli.StringFlag{
 			Name:        "device-profile",
 			Usage:       fmt.Sprintf("Name of the device profile. Valid values are %q.", validProfileNames),
-			Value:       gpu.ProfileName,
+			Value:       network.ProfileName,
 			Destination: &flags.profile,
 			EnvVars:     []string{"DEVICE_PROFILE"},
 		},
@@ -156,26 +153,6 @@ func newApp() *cli.App {
 			Usage:       "UID of the pod (used for seamless upgrades to create unique socket names).",
 			Destination: &flags.podUID,
 			EnvVars:     []string{"POD_UID"},
-		},
-		&cli.IntFlag{
-			Name:        "gpu-partitions",
-			Usage:       "Number of partitions per GPU. When set to a value greater than 0, GPUs are exposed with shared counters allowing flexible partitioning (DRAPartitionableDevices feature).",
-			Value:       0,
-			Destination: &flags.gpuPartitions,
-			EnvVars:     []string{"GPU_PARTITIONS"},
-		},
-		&cli.BoolFlag{
-			Name:        "gpu-device-status",
-			Usage:       "Enable adding allocated device attributes (e.g., model, uuid, driverVersion) into ResourceClaim.status.devices[].data. Disabled by default.",
-			Destination: &flags.gpuDeviceStatus,
-			EnvVars:     []string{"GPU_DEVICE_STATUS"},
-		},
-		&cli.BoolFlag{
-			Name:        "binding-conditions",
-			Usage:       "Enable or disable binding conditions processing in the DRA driver.",
-			Value:       false,
-			Destination: &flags.bindingConditions,
-			EnvVars:     []string{"BINDING_CONDITIONS"},
 		},
 	}
 	cliFlags = append(cliFlags, flags.kubeClientConfig.Flags()...)

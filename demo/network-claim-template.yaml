@@ -1,0 +1,13 @@
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: network-claim-template
+  namespace: default
+spec:
+  spec:
+    devices:
+      requests:
+      - name: network
+        exactly:
+          deviceClassName: network.example.com
+          count: 1
