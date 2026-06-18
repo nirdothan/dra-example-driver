@@ -16,3 +16,7 @@ driver_image.tar
 
 # Ignore config telemetry files
 .config/
+
+# Test and build artifacts
+coverage.out
+logcheck
