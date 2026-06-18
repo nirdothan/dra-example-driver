@@ -18,17 +18,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	resourceapi "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/runtime/serializer/json"
+	runtimejson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 
 	"k8s.io/apimachinery/pkg/types"
 	coreclientset "k8s.io/client-go/kubernetes"
@@ -36,6 +38,7 @@ import (
 	draclient "k8s.io/dynamic-resource-allocation/client"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
 
+	"github.com/opencontainers/selinux/go-selinux"
 	"k8s.io/klog/v2"
 	drapbv1 "k8s.io/kubelet/pkg/apis/dra/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
@@ -108,11 +111,11 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 	}
 
 	// Set up a json serializer to decode our types.
-	configDecoder := json.NewSerializerWithOptions(
-		json.DefaultMetaFactory,
+	configDecoder := runtimejson.NewSerializerWithOptions(
+		runtimejson.DefaultMetaFactory,
 		configScheme,
 		configScheme,
-		json.SerializerOptions{
+		runtimejson.SerializerOptions{
 			Pretty: true,
 			// Config objects are defined by users in ResourceClaims. Strict
 			// decoding helps prevent mistakes.
@@ -216,17 +219,18 @@ func (s *DeviceState) Unprepare(claimUID types.UID) error {
 // ResourceClaim before being consumed by a Pod.
 func (s *DeviceState) prepareDevices(ctx context.Context, claim *resourceapi.ResourceClaim) (PreparedDevices, error) {
 	// Create directories for each allocated device BEFORE computing device config
-	// Directory name format: {claim-name}-{device-name}
+	// Directory path format: {base}/{stable-claim-name}/{request-name}/
+	// A device.json metadata file is created inside with the device ID
 	for _, result := range claim.Status.Allocation.Devices.Results {
 		if result.Driver != s.driverName {
 			continue
 		}
-		claimDir, err := s.createClaimDirectory(claim.Name, result.Device)
+		claimDir, err := s.createClaimDirectory(claim.Name, result.Request, result.Device)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create claim directory: %w", err)
 		}
 		klog.FromContext(ctx).Info("Created directory for claim device",
-			"path", claimDir, "claim", claim.Name, "device", result.Device)
+			"path", claimDir, "claim", claim.Name, "request", result.Request, "device", result.Device)
 	}
 
 	// Compute device configuration (which will call ApplyConfig with claim.Name)
@@ -276,8 +280,9 @@ func (s *DeviceState) unprepareDevices(claimUID types.UID, checkpoint *checkpoin
 		if preparedClaim.UID == claimUID {
 			// Delete directories for all devices allocated to this claim
 			for _, deviceName := range preparedClaim.Devices {
-				if err := s.deleteClaimDirectory(preparedClaim.Name, deviceName); err != nil {
-					klog.Errorf("Failed to delete claim directory for %s-%s: %v", preparedClaim.Name, deviceName, err)
+				requestName := preparedClaim.DeviceRequests[deviceName]
+				if err := s.deleteClaimDirectory(preparedClaim.Name, requestName); err != nil {
+					klog.Errorf("Failed to delete claim directory for %s/%s/%s: %v", preparedClaim.Name, requestName, deviceName, err)
 				}
 			}
 			break
@@ -379,18 +384,21 @@ func (s *DeviceState) computeDeviceConfig(claim *resourceapi.ResourceClaim) (Pre
 // non-deterministic or expensive to recompute, then those should also be added
 // to the checkpoint here.
 func (*DeviceState) addClaimToCheckpoint(checkpoint *checkpointapi.Checkpoint, claim *resourceapi.ResourceClaim, _ PreparedDevices) {
-	// Extract device names from the allocation
+	// Extract device names and request mappings from the allocation
 	var devices []string
+	deviceRequests := make(map[string]string)
 	if claim.Status.Allocation != nil {
 		for _, result := range claim.Status.Allocation.Devices.Results {
 			devices = append(devices, result.Device)
+			deviceRequests[result.Device] = result.Request
 		}
 	}
 
 	checkpoint.PreparedClaims = append(checkpoint.PreparedClaims, checkpointapi.PreparedClaim{
-		UID:     claim.UID,
-		Name:    claim.Name,
-		Devices: devices,
+		UID:            claim.UID,
+		Name:           claim.Name,
+		Devices:        devices,
+		DeviceRequests: deviceRequests,
 	})
 }
 
@@ -426,11 +434,11 @@ func (s *DeviceState) checkAdminAccess(claim *resourceapi.ResourceClaim) bool {
 
 func checkpointSerializer() (runtime.Decoder, runtime.Encoder, error) {
 	checkpointScheme := checkpointinstall.NewScheme()
-	checkpointJSON := json.NewSerializerWithOptions(
-		json.DefaultMetaFactory,
+	checkpointJSON := runtimejson.NewSerializerWithOptions(
+		runtimejson.DefaultMetaFactory,
 		checkpointScheme,
 		checkpointScheme,
-		json.SerializerOptions{
+		runtimejson.SerializerOptions{
 			Pretty: true,
 			// Checkpoints are meant to be read and written only by the driver,
 			// so there is minimal risk that strict decoding will identify any
@@ -532,25 +540,166 @@ func (s *DeviceState) updateDeviceStatus(ctx context.Context, ns, name string, d
 	})
 }
 
-// createClaimDirectory creates a subdirectory for the claim+device
-// Directory name format: {claim-name}-{device-name}
-func (s *DeviceState) createClaimDirectory(claimName string, deviceName string) (string, error) {
-	const baseDir = "/var/run/kubevirt/network"
+// extractStableClaimName extracts the migration-stable portion of a ResourceClaim name.
+// For KubeVirt claims, the format is: virt-launcher-<vmi-name>-<pod-hash>-<template-name>-<claim-hash>
+// We extract: <vmi-name>-<template-name>
+// Example: "virt-launcher-vm-a-drz4j-dummy-gpu-fngjv" -> "vm-a-dummy-gpu"
+func extractStableClaimName(fullClaimName string) string {
+	const virtLauncherPrefix = "virt-launcher-"
 
-	subdirName := fmt.Sprintf("%s-%s", claimName, deviceName)
-	claimDir := filepath.Join(baseDir, subdirName)
+	// Check if this is a KubeVirt virt-launcher claim
+	if !strings.HasPrefix(fullClaimName, virtLauncherPrefix) {
+		// Not a virt-launcher claim, use the full name
+		return fullClaimName
+	}
 
+	// Remove the "virt-launcher-" prefix
+	// Result: "vm-a-drz4j-dummy-gpu-fngjv"
+	withoutPrefix := strings.TrimPrefix(fullClaimName, virtLauncherPrefix)
+
+	// Split by "-" to get parts
+	parts := strings.Split(withoutPrefix, "-")
+
+	// We need at least 4 parts: <vmi-name> <pod-hash> <template-name> <claim-hash>
+	// Example: ["vm", "a", "drz4j", "dummy", "gpu", "fngjv"]
+	if len(parts) < 4 {
+		// Can't parse, use full name
+		return fullClaimName
+	}
+
+	// The pod hash is a 5-character alphanumeric string (e.g., "drz4j")
+	// The claim hash is also a 5-character alphanumeric string at the end (e.g., "fngjv")
+	// Everything between them is the template name
+
+	// Remove the last element (claim hash)
+	withoutClaimHash := parts[:len(parts)-1]
+
+	// Find the pod hash (5-char alphanumeric string, typically the 2nd or 3rd element)
+	// For simplicity, we'll assume it's at index that has exactly 5 chars and is alphanumeric
+	podHashIdx := -1
+	for i, part := range withoutClaimHash {
+		if len(part) == 5 && isAlphanumeric(part) {
+			// Check if the remaining parts after this form a valid template name
+			if i+1 < len(withoutClaimHash) {
+				podHashIdx = i
+				break
+			}
+		}
+	}
+
+	if podHashIdx == -1 {
+		// Couldn't identify pod hash, use full name
+		return fullClaimName
+	}
+
+	// VMI name is everything before pod hash
+	vmiNameParts := withoutClaimHash[:podHashIdx]
+	// Template name is everything after pod hash
+	templateNameParts := withoutClaimHash[podHashIdx+1:]
+
+	// Reconstruct: <vmi-name>-<template-name>
+	vmiName := strings.Join(vmiNameParts, "-")
+	templateName := strings.Join(templateNameParts, "-")
+
+	return vmiName + "-" + templateName
+}
+
+// isAlphanumeric checks if a string contains only alphanumeric characters
+func isAlphanumeric(s string) bool {
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// DeviceMetadata stores device-specific information in the claim directory
+type DeviceMetadata struct {
+	DeviceID string `json:"device_id"`
+}
+
+// createClaimDirectory creates a subdirectory for the claim+request
+// Directory path format: {base}/{stable-claim-name}/{request-name}/
+// The stable-claim-name is derived from the full claim name to be migration-stable.
+// Creates a device.json metadata file inside with the device ID.
+// Sets permissions to 0775, ownership to 107:107, and SELinux label to container_file_t
+func (s *DeviceState) createClaimDirectory(claimName string, requestName string, deviceName string) (string, error) {
+	const baseDir = "/var/run/kubevirt/cdi"
+	const qemuUID = 107
+	const qemuGID = 107
+
+	// Extract migration-stable portion of claim name
+	stableClaimName := extractStableClaimName(claimName)
+	klog.Infof("Creating directory: full claim=%s, stable=%s, request=%s, device=%s",
+		claimName, stableClaimName, requestName, deviceName)
+
+	claimDir := filepath.Join(baseDir, stableClaimName, requestName)
+
+	// Create directory structure
 	if err := os.MkdirAll(claimDir, 0755); err != nil {
 		return "", err
 	}
+
+	// Set ownership and permissions for all created directories
+	// so containers running as uid 107 can access them
+	claimRoot := filepath.Join(baseDir, stableClaimName)
+
+	for _, dir := range []string{claimRoot, claimDir} {
+		// Set ownership to qemu user/group
+		if err := os.Chown(dir, qemuUID, qemuGID); err != nil {
+			return "", fmt.Errorf("failed to chown %s: %w", dir, err)
+		}
+		// Set permissions to 0775 (group can write)
+		if err := os.Chmod(dir, 0775); err != nil {
+			return "", fmt.Errorf("failed to chmod %s: %w", dir, err)
+		}
+		// Set SELinux label for container access (shared across containers)
+		// Always try to set the label; if SELinux is disabled or not supported, it will fail silently
+		if err := selinux.SetFileLabel(dir, "system_u:object_r:container_file_t:s0"); err != nil {
+			// Log but don't fail - SELinux might not be enabled
+			klog.Infof("Could not set SELinux label on %s (this is OK if SELinux is disabled): %v", dir, err)
+		} else {
+			klog.Infof("Successfully set SELinux label to container_file_t on %s", dir)
+		}
+	}
+
+	// Create device metadata file
+	metadataPath := filepath.Join(claimDir, "device.json")
+	metadata := DeviceMetadata{
+		DeviceID: deviceName,
+	}
+
+	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal device metadata: %w", err)
+	}
+
+	if err := os.WriteFile(metadataPath, metadataJSON, 0644); err != nil {
+		return "", fmt.Errorf("failed to write device metadata: %w", err)
+	}
+
+	// Set ownership and permissions on metadata file
+	if err := os.Chown(metadataPath, qemuUID, qemuGID); err != nil {
+		return "", fmt.Errorf("failed to chown metadata file: %w", err)
+	}
+
+	if err := selinux.SetFileLabel(metadataPath, "system_u:object_r:container_file_t:s0"); err != nil {
+		klog.Infof("Could not set SELinux label on %s (this is OK if SELinux is disabled): %v", metadataPath, err)
+	}
+
+	klog.Infof("Created device metadata file at %s with device ID: %s", metadataPath, deviceName)
 
 	return claimDir, nil
 }
 
 // deleteClaimDirectory removes the claim directory
-func (s *DeviceState) deleteClaimDirectory(claimName string, deviceName string) error {
-	const baseDir = "/var/run/kubevirt/network"
-	subdirName := fmt.Sprintf("%s-%s", claimName, deviceName)
-	claimDir := filepath.Join(baseDir, subdirName)
+func (s *DeviceState) deleteClaimDirectory(claimName string, requestName string) error {
+	const baseDir = "/var/run/kubevirt/cdi"
+	// Use stable claim name for consistency
+	stableClaimName := extractStableClaimName(claimName)
+	claimDir := filepath.Join(baseDir, stableClaimName, requestName)
+	klog.Infof("Deleting directory: full claim=%s, stable=%s, path=%s",
+		claimName, stableClaimName, claimDir)
 	return os.RemoveAll(claimDir)
 }

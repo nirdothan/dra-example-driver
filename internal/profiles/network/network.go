@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,10 +36,10 @@ const (
 	ProfileName = "network"
 
 	// HostBaseDir is where directories are created on the host
-	HostBaseDir = "/var/run/kubevirt/network"
+	HostBaseDir = "/var/run/kubevirt/cdi"
 
 	// ContainerMountPath is where the directory is mounted in the container
-	ContainerMountPath = "/var/run/kubevirt/network"
+	ContainerMountPath = "/var/run/kubevirt/cdi"
 )
 
 type Profile struct {
@@ -104,28 +105,94 @@ func (p Profile) Validate(config runtime.Object) error {
 	return nil
 }
 
+// extractStableClaimName extracts the migration-stable portion of a ResourceClaim name.
+// For KubeVirt claims, the format is: virt-launcher-<vmi-name>-<pod-hash>-<template-name>-<claim-hash>
+// We extract: <vmi-name>-<template-name>
+// Example: "virt-launcher-vm-a-drz4j-dummy-gpu-fngjv" -> "vm-a-dummy-gpu"
+func extractStableClaimName(fullClaimName string) string {
+	const virtLauncherPrefix = "virt-launcher-"
+
+	// Check if this is a KubeVirt virt-launcher claim
+	if !strings.HasPrefix(fullClaimName, virtLauncherPrefix) {
+		// Not a virt-launcher claim, use the full name
+		return fullClaimName
+	}
+
+	// Remove the "virt-launcher-" prefix
+	withoutPrefix := strings.TrimPrefix(fullClaimName, virtLauncherPrefix)
+
+	// Split by "-"
+	parts := strings.Split(withoutPrefix, "-")
+
+	// We need at least 4 parts
+	if len(parts) < 4 {
+		return fullClaimName
+	}
+
+	// Remove the last element (claim hash)
+	withoutClaimHash := parts[:len(parts)-1]
+
+	// Find pod hash (5-char alphanumeric)
+	podHashIdx := -1
+	for i, part := range withoutClaimHash {
+		if len(part) == 5 && isAlphanumeric(part) {
+			if i+1 < len(withoutClaimHash) {
+				podHashIdx = i
+				break
+			}
+		}
+	}
+
+	if podHashIdx == -1 {
+		return fullClaimName
+	}
+
+	// VMI name is before pod hash
+	vmiNameParts := withoutClaimHash[:podHashIdx]
+	// Template name is after pod hash
+	templateNameParts := withoutClaimHash[podHashIdx+1:]
+
+	vmiName := strings.Join(vmiNameParts, "-")
+	templateName := strings.Join(templateNameParts, "-")
+
+	return vmiName + "-" + templateName
+}
+
+// isAlphanumeric checks if a string contains only alphanumeric characters
+func isAlphanumeric(s string) bool {
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 // ApplyConfig creates a directory per claim and mounts it via CDI
 // Note: The actual directory creation happens in state.prepareDevices()
-// This function only configures the CDI mount specification
+// This function only configures the CDI mount specification using the stable claim name
 func (p Profile) ApplyConfig(claimName string, config runtime.Object, results []*resourceapi.DeviceRequestAllocationResult) (profiles.PerDeviceCDIContainerEdits, error) {
 	perDeviceEdits := make(profiles.PerDeviceCDIContainerEdits)
 
+	// Extract migration-stable portion of claim name
+	stableClaimName := extractStableClaimName(claimName)
+
 	for _, result := range results {
-		// Build subdirectory name: {claim-name}-{device-name}
-		subdirName := fmt.Sprintf("%s-%s", claimName, result.Device)
-		claimDir := filepath.Join(HostBaseDir, subdirName)
+		// Build directory path: {base}/{stable-claim-name}/{request-name}/
+		// The device ID is stored in a device.json file inside this directory
+		claimDir := filepath.Join(HostBaseDir, stableClaimName, result.Request)
 
 		edits := &cdispec.ContainerEdits{
 			Env: []string{
 				fmt.Sprintf("KUBEVIRT_NETWORK_DEVICE=%s", result.Device),
-				fmt.Sprintf("KUBEVIRT_NETWORK_PATH=%s", ContainerMountPath),
-				fmt.Sprintf("KUBEVIRT_NETWORK_SUBDIR=%s", subdirName),
+				fmt.Sprintf("KUBEVIRT_NETWORK_PATH=%s", claimDir),
+				fmt.Sprintf("KUBEVIRT_NETWORK_REQUEST=%s", result.Request),
 			},
 			Mounts: []*cdispec.Mount{
 				{
 					HostPath:      claimDir,
-					ContainerPath: ContainerMountPath,
-					Options:       []string{"rbind"},
+					ContainerPath: claimDir,
+					Options:       []string{"rbind", "z"},
 				},
 			},
 		}
@@ -137,12 +204,11 @@ func (p Profile) ApplyConfig(claimName string, config runtime.Object, results []
 }
 
 // CreateClaimDirectory creates a subdirectory for the claim+device on the host
-// Directory name format: {claim-name}-{device-name}
+// Directory path format: {base}/{claim-name}/{request-name}/{device-name}
 // This should be called during device preparation
-func CreateClaimDirectory(claimName string, deviceName string) (string, error) {
-	// Create subdirectory named {claim-name}-{device-name}
-	subdirName := fmt.Sprintf("%s-%s", claimName, deviceName)
-	claimDir := filepath.Join(HostBaseDir, subdirName)
+func CreateClaimDirectory(claimName string, requestName string, deviceName string) (string, error) {
+	// Create directory path: {base}/{claim-name}/{request-name}/{device-name}
+	claimDir := filepath.Join(HostBaseDir, claimName, requestName, deviceName)
 
 	if err := os.MkdirAll(claimDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create claim directory %s: %w", claimDir, err)
@@ -153,9 +219,8 @@ func CreateClaimDirectory(claimName string, deviceName string) (string, error) {
 
 // DeleteClaimDirectory removes the claim directory
 // This should be called during device cleanup
-func DeleteClaimDirectory(claimName string, deviceName string) error {
-	subdirName := fmt.Sprintf("%s-%s", claimName, deviceName)
-	claimDir := filepath.Join(HostBaseDir, subdirName)
+func DeleteClaimDirectory(claimName string, requestName string, deviceName string) error {
+	claimDir := filepath.Join(HostBaseDir, claimName, requestName, deviceName)
 
 	if err := os.RemoveAll(claimDir); err != nil {
 		return fmt.Errorf("failed to delete claim directory %s: %w", claimDir, err)

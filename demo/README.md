@@ -1,31 +1,36 @@
 # Demo Examples
 
-This directory contains example workloads that demonstrate different ways to
-request and configure devices using Dynamic Resource Allocation (DRA).
+This directory contains example workloads that demonstrate how to request and configure network devices using Dynamic Resource Allocation (DRA).
 
-Examples prefixed with `basic-` are a good starting point for
-learning about DRA.
+## Files
 
-Each example file has detailed comments at the top explaining what it
-demonstrates, what output to expect, and the driver and cluster requirements.
+- **network-claim-template.yaml** - ResourceClaimTemplate for requesting network devices
+- **network-test-pods.yaml** - Three test pods demonstrating network device usage
+- **build-driver.sh** - Script to build the driver binary
 
 ## Running Examples
 
-Each example can be run individually:
+Deploy the test pods:
 
 ```bash
-kubectl apply -f demo/<example-name>.yaml
+kubectl apply -f demo/network-test-pods.yaml
+```
+
+Check that pods are running and devices are mounted:
+
+```bash
+kubectl get pods -n network-test
+kubectl logs -n network-test network-pod-1
 ```
 
 To clean up:
 
 ```bash
-kubectl delete -f demo/<example-name>.yaml
+kubectl delete -f demo/network-test-pods.yaml
 ```
 
 ## Notes
 
-- The default Helm chart configures **8 GPUs** per node, which is enough to run
-  several examples simultaneously.
-- Each example creates its own namespace, so examples don't interfere with
-  each other's resource names.
+- The default configuration advertises **10 network devices** per node (configurable via `NUM_DEVICES` in `deployments/manifests/daemonset.yaml`)
+- Each ResourceClaim creates a directory at `/var/run/kubevirt/network/{claim-name}-{device-name}`
+- The directory is mounted into containers requesting the device

@@ -42,4 +42,6 @@ type PreparedClaim struct {
 	UID     types.UID
 	Name    string
 	Devices []string
+	// DeviceRequests maps device name to request name for directory cleanup
+	DeviceRequests map[string]string
 }
