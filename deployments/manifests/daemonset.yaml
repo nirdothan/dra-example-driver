@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dra-network-driver
+  namespace: dra-network-driver
+spec:
+  selector:
+    matchLabels:
+      app: dra-network-driver
+  updateStrategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: dra-network-driver
+    spec:
+      priorityClassName: system-node-critical
+      serviceAccountName: dra-network-driver
+      containers:
+      - name: plugin
+        # Update this to your container registry and image tag
+        image:  quay.io/rh-ee-ndothan/dra-example-driver:latest
+        imagePullPolicy: Always
+        command: ["dra-example-kubeletplugin"]
+        securityContext:
+          privileged: true
+        livenessProbe:
+          grpc:
+            port: 51515
+            service: liveness
+          failureThreshold: 3
+          periodSeconds: 10
+        env:
+        - name: DRIVER_NAME
+          value: "network.example.com"
+        - name: DEVICE_PROFILE
+          value: "network"
+        - name: CDI_ROOT
+          value: /var/run/cdi
+        - name: KUBELET_REGISTRAR_DIRECTORY_PATH
+          value: "/var/lib/kubelet/plugins_registry"
+        - name: KUBELET_PLUGINS_DIRECTORY_PATH
+          value: "/var/lib/kubelet/plugins"
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        # Number of network devices to advertise
+        - name: NUM_DEVICES
+          value: "10"
+        - name: HEALTHCHECK_PORT
+          value: "51515"
+        - name: POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        volumeMounts:
+        - name: plugins-registry
+          mountPath: /var/lib/kubelet/plugins_registry
+        - name: plugins
+          mountPath: /var/lib/kubelet/plugins
+        - name: cdi
+          mountPath: /var/run/cdi
+        - name: kubevirt-cdi
+          mountPath: /var/run/kubevirt/cdi
+          mountPropagation: Bidirectional
+      volumes:
+      - name: plugins-registry
+        hostPath:
+          path: /var/lib/kubelet/plugins_registry
+      - name: plugins
+        hostPath:
+          path: /var/lib/kubelet/plugins
+      - name: cdi
+        hostPath:
+          path: /var/run/cdi
+      - name: kubevirt-cdi
+        hostPath:
+          path: /var/run/kubevirt/cdi
+          type: DirectoryOrCreate

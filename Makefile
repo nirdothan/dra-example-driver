@@ -176,10 +176,15 @@ $(DOCKER_TARGETS): docker-%: .build-image
 		-w $(PWD) \
 		$(BUILDIMAGE)
 
+.PHONY: image
+image:
+	$(MAKE) -f deployments/container/Makefile build
+
+.PHONY: push-image
+push-image:
+	$(MAKE) -f deployments/container/Makefile push
+
 .PHONY: push-release-artifacts
 push-release-artifacts:
-	CHART_VERSION="$${CHART_GIT_TAG##chart/}" \
-		HELM=$(HELM) \
-		demo/scripts/push-driver-chart.sh
 	export DRIVER_IMAGE_TAG="${IMAGE_GIT_TAG}"; \
-	demo/scripts/push-driver-image.sh
+	$(MAKE) -f deployments/container/Makefile push
