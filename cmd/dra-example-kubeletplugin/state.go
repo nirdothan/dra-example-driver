@@ -187,7 +187,7 @@ func (s *DeviceState) Prepare(ctx context.Context, claim *resourceapi.ResourceCl
 	return preparedDevices.GetDevices(), nil
 }
 
-func (s *DeviceState) Unprepare(claimUID types.UID) error {
+func (s *DeviceState) Unprepare(ctx context.Context, claimUID types.UID) error {
 	s.Lock()
 	defer s.Unlock()
 
@@ -198,7 +198,7 @@ func (s *DeviceState) Unprepare(claimUID types.UID) error {
 		}
 	}
 
-	if err := s.unprepareDevices(claimUID, checkpoint); err != nil {
+	if err := s.unprepareDevices(ctx, claimUID, checkpoint); err != nil {
 		return fmt.Errorf("unprepare failed: %v", err)
 	}
 	s.removeClaimFromCheckpoint(checkpoint, claimUID)
@@ -225,7 +225,7 @@ func (s *DeviceState) prepareDevices(ctx context.Context, claim *resourceapi.Res
 		if result.Driver != s.driverName {
 			continue
 		}
-		claimDir, err := s.createClaimDirectory(claim.Name, result.Request, result.Device)
+		claimDir, err := s.createClaimDirectory(ctx, claim.Name, result.Request, result.Device)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create claim directory: %w", err)
 		}
@@ -274,15 +274,16 @@ func (s *DeviceState) prepareDevices(ctx context.Context, claim *resourceapi.Res
 
 // unprepareDevices undoes any side-effects produced by
 // [DeviceState.prepareDevices].
-func (s *DeviceState) unprepareDevices(claimUID types.UID, checkpoint *checkpointapi.Checkpoint) error {
+func (s *DeviceState) unprepareDevices(ctx context.Context, claimUID types.UID, checkpoint *checkpointapi.Checkpoint) error {
 	// Find the claim in the checkpoint to get its name and devices
 	for _, preparedClaim := range checkpoint.PreparedClaims {
 		if preparedClaim.UID == claimUID {
 			// Delete directories for all devices allocated to this claim
 			for _, deviceName := range preparedClaim.Devices {
 				requestName := preparedClaim.DeviceRequests[deviceName]
-				if err := s.deleteClaimDirectory(preparedClaim.Name, requestName); err != nil {
-					klog.Errorf("Failed to delete claim directory for %s/%s/%s: %v", preparedClaim.Name, requestName, deviceName, err)
+				if err := s.deleteClaimDirectory(ctx, preparedClaim.Name, requestName); err != nil {
+					klog.FromContext(ctx).Error(err, "Failed to delete claim directory",
+						"claim", preparedClaim.Name, "request", requestName, "device", deviceName)
 				}
 			}
 			break
@@ -624,15 +625,15 @@ type DeviceMetadata struct {
 // The stable-claim-name is derived from the full claim name to be migration-stable.
 // Creates a device.json metadata file inside with the device ID.
 // Sets permissions to 0775, ownership to 107:107, and SELinux label to container_file_t
-func (s *DeviceState) createClaimDirectory(claimName string, requestName string, deviceName string) (string, error) {
+func (s *DeviceState) createClaimDirectory(ctx context.Context, claimName string, requestName string, deviceName string) (string, error) {
 	const baseDir = "/var/run/kubevirt/cdi"
 	const qemuUID = 107
 	const qemuGID = 107
 
 	// Extract migration-stable portion of claim name
 	stableClaimName := extractStableClaimName(claimName)
-	klog.Infof("Creating directory: full claim=%s, stable=%s, request=%s, device=%s",
-		claimName, stableClaimName, requestName, deviceName)
+	klog.FromContext(ctx).Info("Creating directory",
+		"fullClaim", claimName, "stableClaim", stableClaimName, "request", requestName, "device", deviceName)
 
 	claimDir := filepath.Join(baseDir, stableClaimName, requestName)
 
@@ -658,9 +659,9 @@ func (s *DeviceState) createClaimDirectory(claimName string, requestName string,
 		// Always try to set the label; if SELinux is disabled or not supported, it will fail silently
 		if err := selinux.SetFileLabel(dir, "system_u:object_r:container_file_t:s0"); err != nil {
 			// Log but don't fail - SELinux might not be enabled
-			klog.Infof("Could not set SELinux label on %s (this is OK if SELinux is disabled): %v", dir, err)
+			klog.FromContext(ctx).Info("Could not set SELinux label (this is OK if SELinux is disabled)", "path", dir, "error", err)
 		} else {
-			klog.Infof("Successfully set SELinux label to container_file_t on %s", dir)
+			klog.FromContext(ctx).Info("Successfully set SELinux label to container_file_t", "path", dir)
 		}
 	}
 
@@ -685,21 +686,21 @@ func (s *DeviceState) createClaimDirectory(claimName string, requestName string,
 	}
 
 	if err := selinux.SetFileLabel(metadataPath, "system_u:object_r:container_file_t:s0"); err != nil {
-		klog.Infof("Could not set SELinux label on %s (this is OK if SELinux is disabled): %v", metadataPath, err)
+		klog.FromContext(ctx).Info("Could not set SELinux label (this is OK if SELinux is disabled)", "path", metadataPath, "error", err)
 	}
 
-	klog.Infof("Created device metadata file at %s with device ID: %s", metadataPath, deviceName)
+	klog.FromContext(ctx).Info("Created device metadata file", "path", metadataPath, "deviceID", deviceName)
 
 	return claimDir, nil
 }
 
 // deleteClaimDirectory removes the claim directory
-func (s *DeviceState) deleteClaimDirectory(claimName string, requestName string) error {
+func (s *DeviceState) deleteClaimDirectory(ctx context.Context, claimName string, requestName string) error {
 	const baseDir = "/var/run/kubevirt/cdi"
 	// Use stable claim name for consistency
 	stableClaimName := extractStableClaimName(claimName)
 	claimDir := filepath.Join(baseDir, stableClaimName, requestName)
-	klog.Infof("Deleting directory: full claim=%s, stable=%s, path=%s",
-		claimName, stableClaimName, claimDir)
+	klog.FromContext(ctx).Info("Deleting directory",
+		"fullClaim", claimName, "stableClaim", stableClaimName, "path", claimDir)
 	return os.RemoveAll(claimDir)
 }
