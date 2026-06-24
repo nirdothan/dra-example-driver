@@ -1,17 +1,18 @@
 # KubeVirt Network Device Driver for Dynamic Resource Allocation (DRA)
 
-This repository contains a DRA resource driver for use with the [Dynamic
-Resource Allocation
-(DRA)](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
-feature of Kubernetes.
+This is a simplified DRA resource driver for KubeVirt network device testing.
 
-It provides network device isolation for KubeVirt testing by creating
-directory-based resources that can be mounted into containers via CDI.
+It provides network device isolation for KubeVirt by creating directory-based
+resources that can be mounted into containers via CDI. This utility focuses on
+the core functionality needed for testing network device allocation.
 
-## Quickstart and Demo
+## Quickstart
 
 The driver manages network devices and creates migration-stable directory paths
 for KubeVirt VM network isolation testing.
+
+**Note**: This is a simplified version focused on testing. E2E test infrastructure
+has been removed to keep the codebase minimal.
 
 ### Prerequisites
 

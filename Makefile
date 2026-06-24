@@ -80,7 +80,7 @@ ineffassign:
 
 .PHONY: lint
 lint:
-	golangci-lint run --build-tags=e2e ./...
+	golangci-lint run ./...
 
 misspell:
 	misspell $(MODULE)/...
@@ -123,14 +123,7 @@ generate-conversion:
 			$${api}/; \
 	done
 
-setup-e2e:
-	test/e2e/setup-e2e.sh
-
-test-e2e:
-	go run github.com/onsi/ginkgo/v2/ginkgo --tags=e2e -p ./test/e2e/...
-
-teardown-e2e:
-	test/e2e/teardown-e2e.sh
+# E2E tests removed - this is a simplified testing utility
 
 # Generate an image for containerized builds
 # Note: This image is local only
