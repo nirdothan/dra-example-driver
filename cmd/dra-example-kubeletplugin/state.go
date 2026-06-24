@@ -47,6 +47,7 @@ import (
 	checkpointinstall "sigs.k8s.io/dra-example-driver/internal/api/checkpoint/install"
 	checkpointv1alpha1 "sigs.k8s.io/dra-example-driver/internal/api/checkpoint/v1"
 	"sigs.k8s.io/dra-example-driver/internal/profiles"
+	"sigs.k8s.io/dra-example-driver/internal/profiles/network"
 )
 
 type AllocatableDevices map[string]resourceapi.Device
@@ -93,7 +94,7 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 		return nil, fmt.Errorf("error enumerating all possible devices: %v", err)
 	}
 
-	cdi, err := NewCDIHandler(config.flags.cdiRoot, config.flags.driverName, config.flags.profile)
+	cdi, err := NewCDIHandler(config.cdiRoot, config.driverName, network.ProfileName)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create CDI handler: %v", err)
 	}
@@ -127,7 +128,7 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 	)
 
 	allocatable := make(AllocatableDevices)
-	for _, slice := range driverResources.Pools[config.flags.nodeName].Slices {
+	for _, slice := range driverResources.Pools[config.nodeName].Slices {
 		for _, device := range slice.Devices {
 			allocatable[device.Name] = device
 		}
@@ -139,7 +140,7 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 	}
 
 	state := &DeviceState{
-		driverName:        config.flags.driverName,
+		driverName:        config.driverName,
 		cdi:               cdi,
 		driverResources:   driverResources,
 		allocatable:       allocatable,

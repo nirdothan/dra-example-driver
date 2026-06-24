@@ -30,11 +30,10 @@ import (
 )
 
 type driver struct {
-	client      coreclientset.Interface
-	helper      *kubeletplugin.Helper
-	state       *DeviceState
-	healthcheck *healthcheck
-	cancelCtx   func(error)
+	client    coreclientset.Interface
+	helper    *kubeletplugin.Helper
+	state     *DeviceState
+	cancelCtx func(error)
 }
 
 func NewDriver(ctx context.Context, config *Config) (*driver, error) {
@@ -51,21 +50,14 @@ func NewDriver(ctx context.Context, config *Config) (*driver, error) {
 
 	helper, err := kubeletplugin.Start(ctx, driver,
 		kubeletplugin.KubeClient(config.coreclient),
-		kubeletplugin.NodeName(config.flags.nodeName),
-		kubeletplugin.DriverName(config.flags.driverName),
-		kubeletplugin.RegistrarDirectoryPath(config.flags.kubeletRegistrarDirectoryPath),
+		kubeletplugin.NodeName(config.nodeName),
+		kubeletplugin.DriverName(config.driverName),
 		kubeletplugin.PluginDataDirectoryPath(config.DriverPluginPath()),
-		kubeletplugin.RollingUpdate(types.UID(config.flags.podUID)),
 	)
 	if err != nil {
 		return nil, err
 	}
 	driver.helper = helper
-
-	driver.healthcheck, err = startHealthcheck(ctx, config)
-	if err != nil {
-		return nil, fmt.Errorf("start healthcheck: %w", err)
-	}
 
 	if err := helper.PublishResources(ctx, state.driverResources); err != nil {
 		return nil, err
@@ -75,9 +67,6 @@ func NewDriver(ctx context.Context, config *Config) (*driver, error) {
 }
 
 func (d *driver) Shutdown(logger klog.Logger) error {
-	if d.healthcheck != nil {
-		d.healthcheck.Stop(logger)
-	}
 	d.helper.Stop()
 	return nil
 }
