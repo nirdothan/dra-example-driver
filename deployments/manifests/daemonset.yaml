@@ -24,22 +24,16 @@ spec:
         # Update this to your container registry and image tag
         image:  quay.io/rh-ee-ndothan/dra-example-driver:latest
         imagePullPolicy: Always
-        command: ["dra-example-kubeletplugin"]
+        command: ["dra-example-kubeletplugin", "--logtostderr=true", "-v=5"]
         securityContext:
           privileged: true
-        livenessProbe:
-          grpc:
-            port: 51515
-            service: liveness
-          failureThreshold: 3
-          periodSeconds: 10
         env:
         - name: DRIVER_NAME
           value: "network.example.com"
         - name: DEVICE_PROFILE
           value: "network"
         - name: CDI_ROOT
-          value: /var/run/cdi
+          value: /etc/cdi
         - name: KUBELET_REGISTRAR_DIRECTORY_PATH
           value: "/var/lib/kubelet/plugins_registry"
         - name: KUBELET_PLUGINS_DIRECTORY_PATH
@@ -55,8 +49,6 @@ spec:
         # Number of network devices to advertise
         - name: NUM_DEVICES
           value: "10"
-        - name: HEALTHCHECK_PORT
-          value: "51515"
         - name: POD_UID
           valueFrom:
             fieldRef:
@@ -67,7 +59,7 @@ spec:
         - name: plugins
           mountPath: /var/lib/kubelet/plugins
         - name: cdi
-          mountPath: /var/run/cdi
+          mountPath: /etc/cdi
         - name: kubevirt-cdi
           mountPath: /var/run/kubevirt/cdi
           mountPropagation: Bidirectional
@@ -80,7 +72,7 @@ spec:
           path: /var/lib/kubelet/plugins
       - name: cdi
         hostPath:
-          path: /var/run/cdi
+          path: /etc/cdi
       - name: kubevirt-cdi
         hostPath:
           path: /var/run/kubevirt/cdi

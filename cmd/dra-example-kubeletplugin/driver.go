@@ -37,6 +37,8 @@ type driver struct {
 }
 
 func NewDriver(ctx context.Context, config *Config) (*driver, error) {
+	klog.Infof("NewDriver: Starting with registrar path=%s, plugin path=%s", kubeletplugin.KubeletRegistryDir, config.DriverPluginPath())
+
 	driver := &driver{
 		client:    config.coreclient,
 		cancelCtx: config.cancelMainCtx,
@@ -52,8 +54,10 @@ func NewDriver(ctx context.Context, config *Config) (*driver, error) {
 		kubeletplugin.KubeClient(config.coreclient),
 		kubeletplugin.NodeName(config.nodeName),
 		kubeletplugin.DriverName(config.driverName),
+		kubeletplugin.RegistrarDirectoryPath(kubeletplugin.KubeletRegistryDir),
 		kubeletplugin.PluginDataDirectoryPath(config.DriverPluginPath()),
 	)
+	klog.Infof("NewDriver: kubeletplugin.Start returned, err=%v", err)
 	if err != nil {
 		return nil, err
 	}

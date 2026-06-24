@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"strings"
 
+	"k8s.io/klog/v2"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 	cdiparser "tags.cncf.io/container-device-interface/pkg/parser"
 	cdispec "tags.cncf.io/container-device-interface/specs-go"
@@ -85,6 +86,7 @@ func (cdi *CDIHandler) CreateCommonSpecFile() error {
 
 func (cdi *CDIHandler) CreateClaimSpecFile(claimUID string, devices PreparedDevices) error {
 	specName := cdiapi.GenerateTransientSpecName(cdi.vendor(), cdi.class, claimUID)
+	klog.Infof("Creating CDI spec file for claim %s with name %s", claimUID, specName)
 
 	spec := &cdispec.Spec{
 		Kind:    cdi.kind(),
@@ -120,7 +122,13 @@ func (cdi *CDIHandler) CreateClaimSpecFile(claimUID string, devices PreparedDevi
 	}
 	spec.Version = minVersion
 
-	return cdi.cache.WriteSpec(spec, specName)
+	klog.Infof("Writing CDI spec for claim %s, devices: %d", claimUID, len(spec.Devices))
+	if err := cdi.cache.WriteSpec(spec, specName); err != nil {
+		klog.Errorf("Failed to write CDI spec for claim %s: %v", claimUID, err)
+		return err
+	}
+	klog.Infof("Successfully wrote CDI spec file for claim %s", claimUID)
+	return nil
 }
 
 func (cdi *CDIHandler) DeleteClaimSpecFile(claimUID string) error {

@@ -29,7 +29,6 @@ import (
 	resourceapi "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
 	runtimejson "k8s.io/apimachinery/pkg/runtime/serializer/json"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -43,9 +42,7 @@ import (
 	drapbv1 "k8s.io/kubelet/pkg/apis/dra/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 
-	checkpointapi "sigs.k8s.io/dra-example-driver/internal/api/checkpoint"
-	checkpointinstall "sigs.k8s.io/dra-example-driver/internal/api/checkpoint/install"
-	checkpointv1alpha1 "sigs.k8s.io/dra-example-driver/internal/api/checkpoint/v1"
+	"sigs.k8s.io/dra-example-driver/internal/checkpoint"
 	"sigs.k8s.io/dra-example-driver/internal/profiles"
 	"sigs.k8s.io/dra-example-driver/internal/profiles/network"
 )
@@ -81,9 +78,7 @@ type DeviceState struct {
 	configDecoder   runtime.Decoder
 	configHandler   profiles.ConfigHandler
 
-	checkpointPath    string
-	checkpointDecoder runtime.Decoder
-	checkpointEncoder runtime.Encoder
+	checkpointPath string
 
 	coreClient coreclientset.Interface
 }
@@ -134,22 +129,15 @@ func NewDeviceState(config *Config) (*DeviceState, error) {
 		}
 	}
 
-	checkpointDecoder, checkpointEncoder, err := checkpointSerializer()
-	if err != nil {
-		return nil, err
-	}
-
 	state := &DeviceState{
-		driverName:        config.driverName,
-		cdi:               cdi,
-		driverResources:   driverResources,
-		allocatable:       allocatable,
-		configDecoder:     configDecoder,
-		configHandler:     configHandler,
-		checkpointPath:    filepath.Join(config.DriverPluginPath(), DriverPluginCheckpointFile),
-		checkpointDecoder: checkpointDecoder,
-		checkpointEncoder: checkpointEncoder,
-		coreClient:        config.coreclient,
+		driverName:      config.driverName,
+		cdi:             cdi,
+		driverResources: driverResources,
+		allocatable:     allocatable,
+		configDecoder:   configDecoder,
+		configHandler:   configHandler,
+		checkpointPath:  filepath.Join(config.DriverPluginPath(), DriverPluginCheckpointFile),
+		coreClient:      config.coreclient,
 	}
 
 	return state, nil
@@ -159,15 +147,19 @@ func (s *DeviceState) Prepare(ctx context.Context, claim *resourceapi.ResourceCl
 	s.Lock()
 	defer s.Unlock()
 
-	checkpoint, err := readCheckpoint(s.checkpointPath, s.checkpointDecoder)
+	ckpt, err := checkpoint.Read(s.checkpointPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to sync from checkpoint: %v", err)
 	}
-	restoredDevices, err := s.restoreClaimFromCheckpoint(checkpoint, claim)
+	restoredDevices, err := s.restoreClaimFromCheckpoint(ckpt, claim)
 	if err != nil {
 		return nil, fmt.Errorf("unable to restore from checkpoint: %v", err)
 	}
 	if restoredDevices != nil {
+		// Recreate CDI spec file for restored claim
+		if err = s.cdi.CreateClaimSpecFile(string(claim.UID), restoredDevices); err != nil {
+			return nil, fmt.Errorf("unable to create CDI spec file for claim: %v", err)
+		}
 		return restoredDevices.GetDevices(), nil
 	}
 
@@ -175,13 +167,14 @@ func (s *DeviceState) Prepare(ctx context.Context, claim *resourceapi.ResourceCl
 	if err != nil {
 		return nil, fmt.Errorf("prepare failed: %v", err)
 	}
-	s.addClaimToCheckpoint(checkpoint, claim, preparedDevices)
+	s.addClaimToCheckpoint(ckpt, claim, preparedDevices)
 
+	klog.FromContext(ctx).Info("Creating CDI spec file for new claim", "uid", claim.UID, "numDevices", len(preparedDevices))
 	if err = s.cdi.CreateClaimSpecFile(string(claim.UID), preparedDevices); err != nil {
 		return nil, fmt.Errorf("unable to create CDI spec file for claim: %v", err)
 	}
 
-	if err := writeCheckpoint(s.checkpointPath, s.checkpointEncoder, checkpoint); err != nil {
+	if err := checkpoint.Write(s.checkpointPath, ckpt); err != nil {
 		return nil, fmt.Errorf("unable to sync to checkpoint: %v", err)
 	}
 
@@ -192,24 +185,24 @@ func (s *DeviceState) Unprepare(ctx context.Context, claimUID types.UID) error {
 	s.Lock()
 	defer s.Unlock()
 
-	checkpoint, err := readCheckpoint(s.checkpointPath, s.checkpointDecoder)
+	ckpt, err := checkpoint.Read(s.checkpointPath)
 	if err != nil {
-		if err := writeCheckpoint(s.checkpointPath, s.checkpointEncoder, new(checkpointapi.Checkpoint)); err != nil {
+		if err := checkpoint.Write(s.checkpointPath, &checkpoint.Checkpoint{}); err != nil {
 			return fmt.Errorf("unable to create new checkpoint: %v", err)
 		}
 	}
 
-	if err := s.unprepareDevices(ctx, claimUID, checkpoint); err != nil {
+	if err := s.unprepareDevices(ctx, claimUID, ckpt); err != nil {
 		return fmt.Errorf("unprepare failed: %v", err)
 	}
-	s.removeClaimFromCheckpoint(checkpoint, claimUID)
+	s.removeClaimFromCheckpoint(ckpt, claimUID)
 
 	err = s.cdi.DeleteClaimSpecFile(string(claimUID))
 	if err != nil {
 		return fmt.Errorf("unable to delete CDI spec file for claim: %v", err)
 	}
 
-	if err := writeCheckpoint(s.checkpointPath, s.checkpointEncoder, checkpoint); err != nil {
+	if err := checkpoint.Write(s.checkpointPath, ckpt); err != nil {
 		return fmt.Errorf("unable to sync to checkpoint: %v", err)
 	}
 
@@ -275,9 +268,9 @@ func (s *DeviceState) prepareDevices(ctx context.Context, claim *resourceapi.Res
 
 // unprepareDevices undoes any side-effects produced by
 // [DeviceState.prepareDevices].
-func (s *DeviceState) unprepareDevices(ctx context.Context, claimUID types.UID, checkpoint *checkpointapi.Checkpoint) error {
+func (s *DeviceState) unprepareDevices(ctx context.Context, claimUID types.UID, ckpt *checkpoint.Checkpoint) error {
 	// Find the claim in the checkpoint to get its name and devices
-	for _, preparedClaim := range checkpoint.PreparedClaims {
+	for _, preparedClaim := range ckpt.PreparedClaims {
 		if preparedClaim.UID == claimUID {
 			// Delete directories for all devices allocated to this claim
 			for _, deviceName := range preparedClaim.Devices {
@@ -385,7 +378,7 @@ func (s *DeviceState) computeDeviceConfig(claim *resourceapi.ResourceClaim) (Pre
 // devices for the claim. If any parts of the [PreparedDevices] are
 // non-deterministic or expensive to recompute, then those should also be added
 // to the checkpoint here.
-func (*DeviceState) addClaimToCheckpoint(checkpoint *checkpointapi.Checkpoint, claim *resourceapi.ResourceClaim, _ PreparedDevices) {
+func (*DeviceState) addClaimToCheckpoint(ckpt *checkpoint.Checkpoint, claim *resourceapi.ResourceClaim, _ PreparedDevices) {
 	// Extract device names and request mappings from the allocation
 	var devices []string
 	deviceRequests := make(map[string]string)
@@ -396,7 +389,7 @@ func (*DeviceState) addClaimToCheckpoint(checkpoint *checkpointapi.Checkpoint, c
 		}
 	}
 
-	checkpoint.PreparedClaims = append(checkpoint.PreparedClaims, checkpointapi.PreparedClaim{
+	ckpt.PreparedClaims = append(ckpt.PreparedClaims, checkpoint.PreparedClaim{
 		UID:            claim.UID,
 		Name:           claim.Name,
 		Devices:        devices,
@@ -406,14 +399,14 @@ func (*DeviceState) addClaimToCheckpoint(checkpoint *checkpointapi.Checkpoint, c
 
 // removeClaimFromCheckpoint updates the checkpoint to remove all data
 // associated with the claim.
-func (*DeviceState) removeClaimFromCheckpoint(checkpoint *checkpointapi.Checkpoint, claimUID types.UID) {
-	checkpoint.PreparedClaims = slices.DeleteFunc(checkpoint.PreparedClaims, func(c checkpointapi.PreparedClaim) bool { return c.UID == claimUID })
+func (*DeviceState) removeClaimFromCheckpoint(ckpt *checkpoint.Checkpoint, claimUID types.UID) {
+	ckpt.PreparedClaims = slices.DeleteFunc(ckpt.PreparedClaims, func(c checkpoint.PreparedClaim) bool { return c.UID == claimUID })
 }
 
 // restoreClaimFromCheckpoint returns the device definitions for devices already prepared
 // for the given claim. If the claim has not yet been prepared, it returns nil.
-func (s *DeviceState) restoreClaimFromCheckpoint(checkpoint *checkpointapi.Checkpoint, claim *resourceapi.ResourceClaim) (PreparedDevices, error) {
-	if slices.ContainsFunc(checkpoint.PreparedClaims, func(c checkpointapi.PreparedClaim) bool { return c.UID == claim.UID }) {
+func (s *DeviceState) restoreClaimFromCheckpoint(ckpt *checkpoint.Checkpoint, claim *resourceapi.ResourceClaim) (PreparedDevices, error) {
+	if slices.ContainsFunc(ckpt.PreparedClaims, func(c checkpoint.PreparedClaim) bool { return c.UID == claim.UID }) {
 		// If [DeviceState.addClaimToCheckpoint] associated any other data with
 		// the claim in the checkpoint, then that should be added to the
 		// returned [PreparedDevices] here.
@@ -434,26 +427,6 @@ func (s *DeviceState) checkAdminAccess(claim *resourceapi.ResourceClaim) bool {
 	return false
 }
 
-func checkpointSerializer() (runtime.Decoder, runtime.Encoder, error) {
-	checkpointScheme := checkpointinstall.NewScheme()
-	checkpointJSON := runtimejson.NewSerializerWithOptions(
-		runtimejson.DefaultMetaFactory,
-		checkpointScheme,
-		checkpointScheme,
-		runtimejson.SerializerOptions{
-			Pretty: true,
-			// Checkpoints are meant to be read and written only by the driver,
-			// so there is minimal risk that strict decoding will identify any
-			// mistakes. Performance is the better trade-off.
-			Strict: false,
-		},
-	)
-	checkpointCodecFactory := serializer.NewCodecFactory(checkpointScheme)
-	checkpointEncoder := checkpointCodecFactory.EncoderForVersion(checkpointJSON, checkpointv1alpha1.SchemeGroupVersion)
-	checkpointDecoder := checkpointCodecFactory.UniversalDecoder(checkpointapi.SchemeGroupVersion)
-
-	return checkpointDecoder, checkpointEncoder, nil
-}
 
 // GetOpaqueDeviceConfigs returns an ordered list of the configs contained in possibleConfigs for this driver.
 //
