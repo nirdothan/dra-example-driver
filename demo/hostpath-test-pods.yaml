@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: network-pod-1
+  name: hostpath-pod-1
   namespace: default
 spec:
   containers:
@@ -11,26 +11,26 @@ spec:
     command: ["bash", "-c"]
     args:
     - |
-      echo "Pod: network-pod-1"
+      echo "Pod: hostpath-pod-1"
       echo "Network device: $KUBEVIRT_NETWORK_DEVICE"
       echo "Network path: $KUBEVIRT_NETWORK_PATH"
       echo "Directory contents:"
       ls -la $KUBEVIRT_NETWORK_PATH
       echo "Creating test file..."
-      echo "Hello from network-pod-1" > $KUBEVIRT_NETWORK_PATH/test-file.txt
+      echo "Hello from hostpath-pod-1" > $KUBEVIRT_NETWORK_PATH/test-file.txt
       echo "File created. Sleeping..."
       sleep infinity
     resources:
       claims:
-      - name: network
+      - name: hostpath
   resourceClaims:
-  - name: network
-    resourceClaimTemplateName: network-claim-template
+  - name: hostpath
+    resourceClaimTemplateName: hostpath-claim-template
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: network-pod-2
+  name: hostpath-pod-2
   namespace: default
 spec:
   containers:
@@ -39,26 +39,26 @@ spec:
     command: ["bash", "-c"]
     args:
     - |
-      echo "Pod: network-pod-2"
+      echo "Pod: hostpath-pod-2"
       echo "Network device: $KUBEVIRT_NETWORK_DEVICE"
       echo "Network path: $KUBEVIRT_NETWORK_PATH"
       echo "Directory contents:"
       ls -la $KUBEVIRT_NETWORK_PATH
       echo "Creating test file..."
-      echo "Hello from network-pod-2" > $KUBEVIRT_NETWORK_PATH/test-file.txt
+      echo "Hello from hostpath-pod-2" > $KUBEVIRT_NETWORK_PATH/test-file.txt
       echo "File created. Sleeping..."
       sleep infinity
     resources:
       claims:
-      - name: network
+      - name: hostpath
   resourceClaims:
-  - name: network
-    resourceClaimTemplateName: network-claim-template
+  - name: hostpath
+    resourceClaimTemplateName: hostpath-claim-template
 ---
 apiVersion: v1
 kind: Pod
 metadata:
-  name: network-pod-3
+  name: hostpath-pod-3
   namespace: default
 spec:
   containers:
@@ -67,18 +67,18 @@ spec:
     command: ["bash", "-c"]
     args:
     - |
-      echo "Pod: network-pod-3"
+      echo "Pod: hostpath-pod-3"
       echo "Network device: $KUBEVIRT_NETWORK_DEVICE"
       echo "Network path: $KUBEVIRT_NETWORK_PATH"
       echo "Directory contents:"
       ls -la $KUBEVIRT_NETWORK_PATH
       echo "Creating test file..."
-      echo "Hello from network-pod-3" > $KUBEVIRT_NETWORK_PATH/test-file.txt
+      echo "Hello from hostpath-pod-3" > $KUBEVIRT_NETWORK_PATH/test-file.txt
       echo "File created. Sleeping..."
       sleep infinity
     resources:
       claims:
-      - name: network
+      - name: hostpath
   resourceClaims:
-  - name: network
-    resourceClaimTemplateName: network-claim-template
+  - name: hostpath
+    resourceClaimTemplateName: hostpath-claim-template

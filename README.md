@@ -25,8 +25,8 @@ has been removed to keep the codebase minimal.
 
 First clone this repository:
 ```bash
-git clone https://github.com/kubernetes-sigs/dra-example-driver.git
-cd dra-example-driver
+git clone https://github.com/kubernetes-sigs/dra-test-driver.git
+cd dra-test-driver
 ```
 
 Build the driver image:
@@ -42,7 +42,7 @@ can be found in the PATH. To override this behavior, set the `CONTAINER_TOOL` en
 The image build logic lives in `deployments/container/Makefile`.
 If variables are not provided, defaults are:
 
-- `IMAGE_NAME=registry.example.com/dra-example-driver`
+- `IMAGE_NAME=registry.example.com/dra-test-driver`
 - `VERSION=latest`
 - `PLATFORMS=<current host platform>` (for example `linux/amd64`, `linux/arm64`, or `linux/ppc64le`) when `PLATFORMS` is **unset**
 - `CONTAINER_TOOL=docker`
@@ -131,7 +131,7 @@ Check that network devices are advertised:
 ```console
 $ kubectl get resourceslice
 NAME                                                    DRIVER                NODE       ALL ALLOCATED
-worker-node-network.example.com-xxxxx                   network.example.com   worker-1   false
+worker-node-hostpath.network.com-xxxxx                  hostpath.network.com   worker-1   false
 ```
 
 ### Run example workloads

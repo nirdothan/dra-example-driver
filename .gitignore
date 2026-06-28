@@ -3,9 +3,9 @@ vendor/
 [._]*.sw[a-p]
 
 # Binaries (in root directory only)
-/dra-example-kubeletplugin
-/dra-example-controller
-/dra-example-webhook
+/dra-test-kubeletplugin
+/dra-test-controller
+/dra-test-webhook
 
 # IDE
 .idea/

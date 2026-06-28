@@ -15,22 +15,22 @@ Static Kubernetes manifests for deploying the DRA network driver.
 
 1. **Clone the repository on your remote machine:**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/dra-example-driver.git
-   cd dra-example-driver
+   git clone https://github.com/YOUR_USERNAME/dra-test-driver.git
+   cd dra-test-driver
    ```
 
 2. **Build the container image:**
    ```bash
    make image VERSION=v0.1.0 CONTAINER_TOOL=podman
    ```
-   This compiles the source code and builds the container image tagged as `registry.example.com/dra-example-driver:v0.1.0`.
+   This compiles the source code and builds the container image tagged as `registry.example.com/dra-test-driver:v0.1.0`.
    
    (Use `CONTAINER_TOOL=docker` if you have Docker instead of Podman)
 
 3. **Tag and push to your registry:**
    ```bash
    # Example with quay.io
-   docker tag registry.example.com/dra-example-driver:v0.1.0 quay.io/YOUR_USERNAME/dra-network-driver:v0.1.0
+   docker tag registry.example.com/dra-test-driver:v0.1.0 quay.io/YOUR_USERNAME/dra-network-driver:v0.1.0
    docker push quay.io/YOUR_USERNAME/dra-network-driver:v0.1.0
    ```
    Replace `YOUR_USERNAME` with your registry username.
@@ -67,7 +67,7 @@ Static Kubernetes manifests for deploying the DRA network driver.
    ```bash
    kubectl get pods -n dra-network-driver -w
    kubectl get resourceslices
-   kubectl describe resourceslice | grep -A 5 "network.example.com"
+   kubectl describe resourceslice | grep -A 5 "hostpath.network.com"
    ```
 
 8. **Test with example pods:**
@@ -125,7 +125,7 @@ For local testing (kind/minikube), you can load the image directly without a reg
 - **ServiceAccount**: For the driver pods
 - **ClusterRole/ClusterRoleBinding**: RBAC permissions for managing ResourceClaims and ResourceSlices
 - **DaemonSet**: Runs the kubelet plugin on every node
-- **DeviceClass**: `network.example.com` for requesting network devices
+- **DeviceClass**: `hostpath.network.com` for requesting hostpath devices
 - **ValidatingAdmissionPolicy**: Restricts ResourceSlice modifications to node-local service accounts
 
 ## Configuration

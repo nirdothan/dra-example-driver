@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
 
 	resourceapi "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,9 +43,9 @@ import (
 	drapbv1 "k8s.io/kubelet/pkg/apis/dra/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 
-	"sigs.k8s.io/dra-example-driver/internal/checkpoint"
-	"sigs.k8s.io/dra-example-driver/internal/profiles"
-	"sigs.k8s.io/dra-example-driver/internal/profiles/network"
+	"sigs.k8s.io/dra-test-driver/internal/checkpoint"
+	"sigs.k8s.io/dra-test-driver/internal/profiles"
+	"sigs.k8s.io/dra-test-driver/internal/profiles/network"
 )
 
 type AllocatableDevices map[string]resourceapi.Device
@@ -310,7 +311,7 @@ func (s *DeviceState) computeDeviceConfig(claim *resourceapi.ResourceClaim) (Pre
 		return nil, fmt.Errorf("error getting opaque device configs: %v", err)
 	}
 
-	// Add the default GPU Config to the front of the config list with the
+	// Add the default device config to the front of the config list with the
 	// lowest precedence. This guarantees there will be at least one config in
 	// the list with len(Requests) == 0 for the lookup below.
 	configs = slices.Insert(configs, 0, &OpaqueDeviceConfig{})
@@ -427,7 +428,6 @@ func (s *DeviceState) checkAdminAccess(claim *resourceapi.ResourceClaim) bool {
 	return false
 }
 
-
 // GetOpaqueDeviceConfigs returns an ordered list of the configs contained in possibleConfigs for this driver.
 //
 // Configs can either come from the resource claim itself or from the device
@@ -517,8 +517,8 @@ func (s *DeviceState) updateDeviceStatus(ctx context.Context, ns, name string, d
 
 // extractStableClaimName extracts the migration-stable portion of a ResourceClaim name.
 // For KubeVirt claims, the format is: virt-launcher-<vmi-name>-<pod-hash>-<template-name>-<claim-hash>
-// We extract: <vmi-name>-<template-name>
-// Example: "virt-launcher-vm-a-drz4j-dummy-gpu-fngjv" -> "vm-a-dummy-gpu"
+// We extract: <vmi-name>-<template-name>.
+// Example: "virt-launcher-vm-a-drz4j-dummy-gpu-fngjv" -> "vm-a-dummy-gpu".
 func extractStableClaimName(fullClaimName string) string {
 	const virtLauncherPrefix = "virt-launcher-"
 
@@ -579,26 +579,26 @@ func extractStableClaimName(fullClaimName string) string {
 	return vmiName + "-" + templateName
 }
 
-// isAlphanumeric checks if a string contains only alphanumeric characters
+// isAlphanumeric checks if a string contains only alphanumeric characters.
 func isAlphanumeric(s string) bool {
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+		if !unicode.IsLetter(c) && !unicode.IsDigit(c) {
 			return false
 		}
 	}
 	return true
 }
 
-// DeviceMetadata stores device-specific information in the claim directory
+// DeviceMetadata stores device-specific information in the claim directory.
 type DeviceMetadata struct {
 	DeviceID string `json:"device_id"`
 }
 
-// createClaimDirectory creates a subdirectory for the claim+request
-// Directory path format: {base}/{stable-claim-name}/{request-name}/
+// createClaimDirectory creates a subdirectory for the claim+request.
+// Directory path format: {base}/{stable-claim-name}/{request-name}/.
 // The stable-claim-name is derived from the full claim name to be migration-stable.
 // Creates a device.json metadata file inside with the device ID.
-// Sets permissions to 0775, ownership to 107:107, and SELinux label to container_file_t
+// Sets permissions to 0775, ownership to 107:107, and SELinux label to container_file_t.
 func (s *DeviceState) createClaimDirectory(ctx context.Context, claimName string, requestName string, deviceName string) (string, error) {
 	const baseDir = "/var/run/kubevirt/cdi"
 	const qemuUID = 107
@@ -668,7 +668,7 @@ func (s *DeviceState) createClaimDirectory(ctx context.Context, claimName string
 	return claimDir, nil
 }
 
-// deleteClaimDirectory removes the claim directory
+// deleteClaimDirectory removes the claim directory.
 func (s *DeviceState) deleteClaimDirectory(ctx context.Context, claimName string, requestName string) error {
 	const baseDir = "/var/run/kubevirt/cdi"
 	// Use stable claim name for consistency

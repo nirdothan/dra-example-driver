@@ -117,7 +117,7 @@ ls -lZ /var/run/kubevirt/cdi/{claim}/{request}/{device}
 
 2. **Check CDI spec was created:**
 ```bash
-cat /var/run/cdi/network.example.com-{device}.yaml
+cat /var/run/cdi/hostpath.network.com-{device}.yaml
 ```
 
 3. **Check environment variables in pod:**
@@ -134,7 +134,7 @@ kubectl exec -it {pod} -c {container} -- touch {path}/testfile
 
 - `deployments/manifests/daemonset.yaml` - Added volume mount with Bidirectional propagation, changed imagePullPolicy
 - `internal/profiles/network/network.go` - Changed directory structure, updated CDI mount spec
-- `cmd/dra-example-kubeletplugin/state.go` - Added permissions, ownership, SELinux labeling
+- `cmd/dra-test-kubeletplugin/state.go` - Added permissions, ownership, SELinux labeling
 - `internal/api/checkpoint/types.go` - Added DeviceRequests map for cleanup tracking
 
 ## Lessons Learned

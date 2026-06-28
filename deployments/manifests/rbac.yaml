@@ -18,7 +18,7 @@ rules:
 - apiGroups: ["resource.k8s.io"]
   resources: ["resourceclaims/driver"]
   verbs: ["associated-node:update", "associated-node:patch"]
-  resourceNames: ["network.example.com"]
+  resourceNames: ["hostpath.network.com"]
 - apiGroups: [""]
   resources: ["nodes"]
   verbs: ["get"]

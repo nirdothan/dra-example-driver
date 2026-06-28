@@ -1,4 +1,4 @@
-module sigs.k8s.io/dra-example-driver/hack/tools
+module sigs.k8s.io/dra-test-driver/hack/tools
 
 go 1.25.0
 

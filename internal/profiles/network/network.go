@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	resourceapi "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,16 +30,16 @@ import (
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 	cdispec "tags.cncf.io/container-device-interface/specs-go"
 
-	"sigs.k8s.io/dra-example-driver/internal/profiles"
+	"sigs.k8s.io/dra-test-driver/internal/profiles"
 )
 
 const (
-	ProfileName = "network"
+	ProfileName = "hostpath"
 
-	// HostBaseDir is where directories are created on the host
+	// HostBaseDir is where directories are created on the host.
 	HostBaseDir = "/var/run/kubevirt/cdi"
 
-	// ContainerMountPath is where the directory is mounted in the container
+	// ContainerMountPath is where the directory is mounted in the container.
 	ContainerMountPath = "/var/run/kubevirt/cdi"
 )
 
@@ -54,8 +55,8 @@ func NewProfile(nodeName string, numDevices int) Profile {
 	}
 }
 
-// EnumerateDevices advertises the available network directory devices
-// This is called at driver startup (discovery time)
+// EnumerateDevices advertises the available network directory devices.
+// This is called at driver startup (discovery time).
 func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 	// Create the base directory at discovery time
 	if err := os.MkdirAll(HostBaseDir, 0755); err != nil {
@@ -67,7 +68,7 @@ func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 	// Create N simple devices (just slots for directory claims)
 	for i := 0; i < p.numDevices; i++ {
 		devices = append(devices, resourceapi.Device{
-			Name: fmt.Sprintf("network-%d", i),
+			Name: fmt.Sprintf("hostpath-%d", i),
 			Attributes: map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
 				"index": {
 					IntValue: ptr.To(int64(i)),
@@ -90,14 +91,14 @@ func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 	return resources, nil
 }
 
-// SchemeBuilder implements profiles.ConfigHandler
-// No custom config needed for network directories
+// SchemeBuilder implements profiles.ConfigHandler.
+// No custom config needed for network directories.
 func (p Profile) SchemeBuilder() runtime.SchemeBuilder {
 	return runtime.NewSchemeBuilder()
 }
 
-// Validate implements profiles.ConfigHandler
-// No custom config to validate
+// Validate implements profiles.ConfigHandler.
+// No custom config to validate.
 func (p Profile) Validate(config runtime.Object) error {
 	if config != nil {
 		return fmt.Errorf("configuration not supported for network profile")
@@ -107,8 +108,8 @@ func (p Profile) Validate(config runtime.Object) error {
 
 // extractStableClaimName extracts the migration-stable portion of a ResourceClaim name.
 // For KubeVirt claims, the format is: virt-launcher-<vmi-name>-<pod-hash>-<template-name>-<claim-hash>
-// We extract: <vmi-name>-<template-name>
-// Example: "virt-launcher-vm-a-drz4j-dummy-gpu-fngjv" -> "vm-a-dummy-gpu"
+// We extract: <vmi-name>-<template-name>.
+// Example: "virt-launcher-vm-a-drz4j-dummy-gpu-fngjv" -> "vm-a-dummy-gpu".
 func extractStableClaimName(fullClaimName string) string {
 	const virtLauncherPrefix = "virt-launcher-"
 
@@ -158,19 +159,19 @@ func extractStableClaimName(fullClaimName string) string {
 	return vmiName + "-" + templateName
 }
 
-// isAlphanumeric checks if a string contains only alphanumeric characters
+// isAlphanumeric checks if a string contains only alphanumeric characters.
 func isAlphanumeric(s string) bool {
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+		if !unicode.IsLetter(c) && !unicode.IsDigit(c) {
 			return false
 		}
 	}
 	return true
 }
 
-// ApplyConfig creates a directory per claim and mounts it via CDI
-// Note: The actual directory creation happens in state.prepareDevices()
-// This function only configures the CDI mount specification using the stable claim name
+// ApplyConfig creates a directory per claim and mounts it via CDI.
+// Note: The actual directory creation happens in state.prepareDevices().
+// This function only configures the CDI mount specification using the stable claim name.
 func (p Profile) ApplyConfig(claimName string, config runtime.Object, results []*resourceapi.DeviceRequestAllocationResult) (profiles.PerDeviceCDIContainerEdits, error) {
 	perDeviceEdits := make(profiles.PerDeviceCDIContainerEdits)
 
@@ -203,9 +204,9 @@ func (p Profile) ApplyConfig(claimName string, config runtime.Object, results []
 	return perDeviceEdits, nil
 }
 
-// CreateClaimDirectory creates a subdirectory for the claim+device on the host
-// Directory path format: {base}/{claim-name}/{request-name}/{device-name}
-// This should be called during device preparation
+// CreateClaimDirectory creates a subdirectory for the claim+device on the host.
+// Directory path format: {base}/{claim-name}/{request-name}/{device-name}.
+// This should be called during device preparation.
 func CreateClaimDirectory(claimName string, requestName string, deviceName string) (string, error) {
 	// Create directory path: {base}/{claim-name}/{request-name}/{device-name}
 	claimDir := filepath.Join(HostBaseDir, claimName, requestName, deviceName)
@@ -217,8 +218,8 @@ func CreateClaimDirectory(claimName string, requestName string, deviceName strin
 	return claimDir, nil
 }
 
-// DeleteClaimDirectory removes the claim directory
-// This should be called during device cleanup
+// DeleteClaimDirectory removes the claim directory.
+// This should be called during device cleanup.
 func DeleteClaimDirectory(claimName string, requestName string, deviceName string) error {
 	claimDir := filepath.Join(HostBaseDir, claimName, requestName, deviceName)
 

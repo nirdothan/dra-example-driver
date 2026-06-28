@@ -1,8 +1,8 @@
 apiVersion: resource.k8s.io/v1
 kind: DeviceClass
 metadata:
-  name: network.example.com
+  name: hostpath.network.com
 spec:
   selectors:
   - cel:
-      expression: "device.driver == 'network.example.com'"
+      expression: "device.driver == 'hostpath.network.com'"

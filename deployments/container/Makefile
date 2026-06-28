@@ -54,7 +54,7 @@ else ifeq ($(strip $(PLATFORMS)),)
   $(error PLATFORMS is set but empty. Unset it to use the host platform, or provide one or more values)
 endif
 
-BUILDX_BUILDER ?= dra-example-driver-builder
+BUILDX_BUILDER ?= dra-test-driver-builder
 
 # Default to disabled so release builds are stable across older buildx setups.
 # Can be overridden by CI/release jobs that require attestations.

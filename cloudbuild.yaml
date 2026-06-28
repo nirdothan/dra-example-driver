@@ -6,8 +6,8 @@ steps:
 - name: gcr.io/k8s-staging-test-infra/gcb-docker-gcloud:v20260205-38cfa9523f # Go 1.25
   entrypoint: make
   env:
-  - DRIVER_IMAGE_REGISTRY=us-central1-docker.pkg.dev/k8s-staging-images/dra-example-driver
+  - DRIVER_IMAGE_REGISTRY=us-central1-docker.pkg.dev/k8s-staging-images/dra-test-driver
   - PLATFORMS=linux/amd64,linux/arm64,linux/ppc64le
-  - DRIVER_CHART_REGISTRY=us-central1-docker.pkg.dev/k8s-staging-images/dra-example-driver/charts
+  - DRIVER_CHART_REGISTRY=us-central1-docker.pkg.dev/k8s-staging-images/dra-test-driver/charts
   args:
     - push-release-artifacts

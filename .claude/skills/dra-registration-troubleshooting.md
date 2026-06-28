@@ -4,7 +4,7 @@
 
 Pods fail to start with error:
 ```
-Failed to prepare dynamic resources: prepare dynamic resources: DRA driver network.example.com is not registered
+Failed to prepare dynamic resources: prepare dynamic resources: DRA driver hostpath.network.com is not registered
 ```
 
 ## Root Causes
@@ -13,7 +13,7 @@ Failed to prepare dynamic resources: prepare dynamic resources: DRA driver netwo
 
 **Problem**: The kubelet plugin library requires explicit registration directory path to create the registration socket.
 
-**Code Location**: `cmd/dra-example-kubeletplugin/driver.go`
+**Code Location**: `cmd/dra-test-kubeletplugin/driver.go`
 
 **Fix**: Ensure `kubeletplugin.Start()` includes the `RegistrarDirectoryPath` option:
 
@@ -34,18 +34,18 @@ kubectl logs <driver-pod> -n dra-network-driver | grep registrar
 
 Should show:
 ```
-GRPC server started logger="registrar" endpoint="/var/lib/kubelet/plugins_registry/network.example.com-reg.sock"
+GRPC server started logger="registrar" endpoint="/var/lib/kubelet/plugins_registry/hostpath.network.com-reg.sock"
 ```
 
 **Verify sockets exist on host**:
 ```bash
 # SSH to node or use debug pod
 sudo ls -la /var/lib/kubelet/plugins_registry/
-sudo ls -la /var/lib/kubelet/plugins/network.example.com/
+sudo ls -la /var/lib/kubelet/plugins/hostpath.network.com/
 ```
 
 Should see:
-- `network.example.com-reg.sock` - registration socket
+- `hostpath.network.com-reg.sock` - registration socket
 - `dra.sock` - DRA plugin socket
 
 ### 2. Sockets Disappear After Pod Creation
@@ -98,7 +98,7 @@ kubectl apply -f deployments/manifests/daemonset.yaml
 
 4. **Verify DRA socket exists**:
    ```bash
-   ~/work/kubevirt/kubevirtci/cluster-up/ssh.sh <node> "sudo ls -la /var/lib/kubelet/plugins/network.example.com/"
+   ~/work/kubevirt/kubevirtci/cluster-up/ssh.sh <node> "sudo ls -la /var/lib/kubelet/plugins/hostpath.network.com/"
    ```
 
 5. **Check driver can write to directories**:
@@ -137,7 +137,7 @@ volumes:
 
 Enable verbose logging in DaemonSet:
 ```yaml
-command: ["dra-example-kubeletplugin", "--logtostderr=true", "-v=5"]
+command: ["dra-test-kubeletplugin", "--logtostderr=true", "-v=5"]
 ```
 
 Key log messages to look for:
@@ -150,5 +150,5 @@ Key log messages to look for:
 ## Related Issues
 
 - **CDI injection failures**: Check `/etc/cdi` directory has spec files (see CDI troubleshooting)
-- **Checkpoint issues**: Check `/var/lib/kubelet/plugins/network.example.com/checkpoint.json` exists
+- **Checkpoint issues**: Check `/var/lib/kubelet/plugins/hostpath.network.com/checkpoint.json` exists
 - **Permission errors**: Driver runs as privileged, verify `securityContext.privileged: true`

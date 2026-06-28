@@ -32,8 +32,8 @@ import (
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/klog/v2"
 
-	"sigs.k8s.io/dra-example-driver/internal/profiles"
-	"sigs.k8s.io/dra-example-driver/internal/profiles/network"
+	"sigs.k8s.io/dra-test-driver/internal/profiles"
+	"sigs.k8s.io/dra-test-driver/internal/profiles/network"
 )
 
 const (
@@ -64,7 +64,7 @@ func main() {
 	flag.StringVar(&config.cdiRoot, "cdi-root", "/etc/cdi", "Absolute path to the CDI directory")
 	flag.IntVar(&config.numDevices, "num-devices", 10, "Number of network devices to advertise")
 	flag.StringVar(&config.kubeletPluginsDirectoryPath, "kubelet-plugins-directory-path", kubeletplugin.KubeletPluginsDir, "Kubelet plugins directory")
-	flag.StringVar(&config.driverName, "driver-name", "network.example.com", "DRA driver name")
+	flag.StringVar(&config.driverName, "driver-name", "hostpath.network.com", "DRA driver name")
 	flag.StringVar(&config.kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "Path to kubeconfig (optional, uses in-cluster config if not set)")
 
 	klog.InitFlags(nil)

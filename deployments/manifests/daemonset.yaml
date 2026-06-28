@@ -22,14 +22,14 @@ spec:
       containers:
       - name: plugin
         # Update this to your container registry and image tag
-        image:  quay.io/rh-ee-ndothan/dra-example-driver:latest
+        image: quay.io/rh-ee-ndothan/dra-test-driver:latest
         imagePullPolicy: Always
-        command: ["dra-example-kubeletplugin", "--logtostderr=true", "-v=5"]
+        command: ["dra-test-kubeletplugin", "--logtostderr=true", "-v=5"]
         securityContext:
           privileged: true
         env:
         - name: DRIVER_NAME
-          value: "network.example.com"
+          value: "hostpath.network.com"
         - name: DEVICE_PROFILE
           value: "network"
         - name: CDI_ROOT
